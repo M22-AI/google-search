@@ -916,7 +916,7 @@ export async function googleSearch(
 
 
             // redirect google
-            const finalUrl = await getFinalUrlWithPlaywright(link, browser);
+            const finalUrl = await resolveGoogleRedirect(link);
             if (finalUrl) {
               link = finalUrl;
             }
@@ -1599,22 +1599,69 @@ export async function getGoogleSearchPageHtml(
   return performSearchAndGetHtml(useHeadless);
 }
 
-async function getFinalUrlWithPlaywright(targetUrl: string, browser: Browser): Promise<string | undefined> {
-  const context = await browser.newContext();
-  const page: Page = await context.newPage();
+function isGoogleFamilyHost(hostname: string) {
+  return /^(\w+\.)*(google\.[a-z.]+|doubleclick\.net|googleadservices\.com)$/.test(
+    hostname
+  );
+}
 
+function isGoogleRedirectWrapper(link: string) {
   try {
-    // Buka halaman dan tunggu hingga proses redirect selesai
-    await page.goto(targetUrl, { waitUntil: 'load' });
-
-    // Ambil URL terakhir setelah redirect
-    const finalUrl: string = page.url();
-    console.log('Final URL (Playwright):', finalUrl);
-
-    return finalUrl;
-  } catch (error) {
-    console.error('Error saat navigasi:', error);
-  } finally {
-    await browser.close();
+    const url = new URL(link);
+    return (
+      isGoogleFamilyHost(url.hostname) &&
+      (url.pathname === "/url" ||
+        url.pathname === "/goto" ||
+        url.pathname === "/aclk" ||
+        url.pathname.endsWith("/aclk"))
+    );
+  } catch {
+    return false;
   }
+}
+
+function unwrapGoogleRedirect(link: string) {
+  if (!isGoogleRedirectWrapper(link)) return link;
+  try {
+    const url = new URL(link);
+    const target =
+      url.searchParams.get("q") ||
+      url.searchParams.get("url") ||
+      url.searchParams.get("adurl");
+    if (target && /^https?:\/\//i.test(target)) return target;
+  } catch { }
+  return link;
+}
+
+async function resolveGoogleRedirect(link: string) {
+  const embedded = unwrapGoogleRedirect(link);
+  if (embedded !== link) return embedded;
+  let current = link;
+  for (let hop = 0; hop < 4; hop++) {
+    let response;
+    try {
+      response = await fetch(current, {
+        method: "GET",
+        redirect: "manual",
+        signal: AbortSignal.timeout(2000),
+      });
+    } catch (error) {
+      console.error("Gagal menyelesaikan redirect", error);
+      return current;
+    }
+    try {
+      await response.body?.cancel();
+    } catch { }
+    const location = response.headers.get("location");
+    if (!(response.status >= 300 && response.status < 400) || !location) {
+      return current;
+    }
+    try {
+      current = new URL(location, current).href;
+    } catch {
+      return current;
+    }
+    if (!isGoogleFamilyHost(new URL(current).hostname)) return current;
+  }
+  return current;
 }
