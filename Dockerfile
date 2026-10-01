@@ -9,6 +9,7 @@ RUN apt-get update \
 
 WORKDIR /app
 RUN git clone https://github.com/web-agent-master/google-search.git \
+    && cd google-search \
     && git checkout ${GOOGLE_SEARCH_REF}
 
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
