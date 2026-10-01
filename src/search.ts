@@ -1,4 +1,4 @@
-import { chromium, devices, BrowserContextOptions, Browser } from "playwright";
+import { chromium, devices, BrowserContextOptions, Browser, Page } from "playwright";
 import { SearchResponse, SearchResult, CommandOptions, HtmlResponse } from "./types.js";
 import * as fs from "fs";
 import * as path from "path";
@@ -343,8 +343,8 @@ export async function googleSearch(
       // @ts-ignore - 忽略 chrome 属性不存在的错误
       window.chrome = {
         runtime: {},
-        loadTimes: function () {},
-        csi: function () {},
+        loadTimes: function () { },
+        csi: function () { },
         app: {},
       };
 
@@ -881,49 +881,49 @@ export async function googleSearch(
             }
           }
         }
-        
+
         // 如果主要选择器未找到足够结果，尝试更通用的方法 (作为补充)
         if (results.length < maxResults) {
-            const anchorElements = Array.from(document.querySelectorAll("a[href^='http']"));
-            for (const el of anchorElements) {
-                if (results.length >= maxResults) break;
+          const anchorElements = Array.from(document.querySelectorAll("a[href^='http']"));
+          for (const el of anchorElements) {
+            if (results.length >= maxResults) break;
 
-                // 检查 el 是否为 HTMLAnchorElement
-                if (!(el instanceof HTMLAnchorElement)) {
-                    continue;
-                }
-                let link = el.href;
-                // 过滤掉导航链接、图片链接、已存在链接等
-                if (!link || seenUrls.has(link) || link.includes("google.com/") || link.includes("accounts.google") || link.includes("support.google")) {
-                    continue;
-                }
-
-                const title = (el.textContent || "").trim();
-                if (!title) continue; // 跳过没有文本内容的链接
-
-                // 尝试获取周围的文本作为摘要
-                let snippet = "";
-                let parent = el.parentElement;
-                for (let i = 0; i < 3 && parent; i++) {
-                  const text = (parent.textContent || "").trim();
-                  // 确保摘要文本与标题不同且有一定长度
-                  if (text.length > 20 && text !== title) {
-                    snippet = text;
-                    break; // 找到合适的摘要就停止向上查找
-                  }
-                  parent = parent.parentElement;
-                }
-
-
-                // redirect google
-                const finalUrl = await getFinalUrl(link);
-                if (finalUrl) {
-                  link = finalUrl;
-                }
-
-                results.push({ title, link, snippet });
-                seenUrls.add(link);
+            // 检查 el 是否为 HTMLAnchorElement
+            if (!(el instanceof HTMLAnchorElement)) {
+              continue;
             }
+            let link = el.href;
+            // 过滤掉导航链接、图片链接、已存在链接等
+            if (!link || seenUrls.has(link) || link.includes("google.com/") || link.includes("accounts.google") || link.includes("support.google")) {
+              continue;
+            }
+
+            const title = (el.textContent || "").trim();
+            if (!title) continue; // 跳过没有文本内容的链接
+
+            // 尝试获取周围的文本作为摘要
+            let snippet = "";
+            let parent = el.parentElement;
+            for (let i = 0; i < 3 && parent; i++) {
+              const text = (parent.textContent || "").trim();
+              // 确保摘要文本与标题不同且有一定长度
+              if (text.length > 20 && text !== title) {
+                snippet = text;
+                break; // 找到合适的摘要就停止向上查找
+              }
+              parent = parent.parentElement;
+            }
+
+
+            // redirect google
+            const finalUrl = await getFinalUrlWithPlaywright(link, browser);
+            if (finalUrl) {
+              link = finalUrl;
+            }
+
+            results.push({ title, link, snippet });
+            seenUrls.add(link);
+          }
         }
 
         return results.slice(0, maxResults); // 确保不超过限制
@@ -1016,18 +1016,17 @@ export async function googleSearch(
 
       // 返回错误信息或空结果
       // logger.error 已经记录了错误，这里返回一个包含错误信息的模拟结果
-       return {
-         query,
-         results: [
-           {
-             title: "搜索失败",
-             link: "",
-             snippet: `无法完成搜索，错误信息: ${
-               error instanceof Error ? error.message : String(error)
-             }`,
-           },
-         ],
-       };
+      return {
+        query,
+        results: [
+          {
+            title: "搜索失败",
+            link: "",
+            snippet: `无法完成搜索，错误信息: ${error instanceof Error ? error.message : String(error)
+              }`,
+          },
+        ],
+      };
     }
     // 移除 finally 块，因为资源清理已经在 try 和 catch 块中处理
   }
@@ -1138,7 +1137,7 @@ export async function getGoogleSearchPageHtml(
   // 定义一个专门的函数来获取HTML
   async function performSearchAndGetHtml(headless: boolean): Promise<HtmlResponse> {
     let browser: Browser;
-    
+
     // 初始化浏览器，添加更多参数以避免检测
     browser = await chromium.launch({
       headless,
@@ -1263,8 +1262,8 @@ export async function getGoogleSearchPageHtml(
       // @ts-ignore - 忽略 chrome 属性不存在的错误
       window.chrome = {
         runtime: {},
-        loadTimes: function () {},
-        csi: function () {},
+        loadTimes: function () { },
+        csi: function () { },
         app: {},
       };
 
@@ -1343,7 +1342,7 @@ export async function getGoogleSearchPageHtml(
           await page.close();
           await context.close();
           await browser.close();
-          
+
           // 以有头模式重新执行
           return performSearchAndGetHtml(false);
         } else {
@@ -1418,7 +1417,7 @@ export async function getGoogleSearchPageHtml(
           await page.close();
           await context.close();
           await browser.close();
-          
+
           // 以有头模式重新执行
           return performSearchAndGetHtml(false);
         } else {
@@ -1447,13 +1446,13 @@ export async function getGoogleSearchPageHtml(
       // 添加额外的等待时间，确保页面完全加载和稳定
       logger.info("等待页面稳定...");
       await page.waitForTimeout(1000); // 等待1秒，让页面完全稳定
-      
+
       // 再次等待网络空闲，确保所有异步操作完成
       await page.waitForLoadState("networkidle", { timeout });
-      
+
       // 获取页面HTML内容
       const fullHtml = await page.content();
-      
+
       // 移除CSS和JavaScript内容，只保留纯HTML
       // 移除所有<style>标签及其内容
       let html = fullHtml.replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '');
@@ -1461,7 +1460,7 @@ export async function getGoogleSearchPageHtml(
       html = html.replace(/<link\s+[^>]*rel=["']stylesheet["'][^>]*>/gi, '');
       // 移除所有<script>标签及其内容
       html = html.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
-      
+
       logger.info({
         originalLength: fullHtml.length,
         cleanedLength: html.length
@@ -1470,7 +1469,7 @@ export async function getGoogleSearchPageHtml(
       // 如果需要，将HTML保存到文件并截图
       let savedFilePath: string | undefined = undefined;
       let screenshotPath: string | undefined = undefined;
-      
+
       if (saveToFile) {
         // 生成默认文件名（如果未提供）
         if (!outputPath) {
@@ -1479,7 +1478,7 @@ export async function getGoogleSearchPageHtml(
           if (!fs.existsSync(outputDir)) {
             fs.mkdirSync(outputDir, { recursive: true });
           }
-          
+
           // 生成文件名：查询词-时间戳.html
           const timestamp = new Date().toISOString().replace(/:/g, "-").replace(/\./g, "-");
           const sanitizedQuery = query.replace(/[^a-zA-Z0-9]/g, "_").substring(0, 50);
@@ -1496,18 +1495,18 @@ export async function getGoogleSearchPageHtml(
         fs.writeFileSync(outputPath, html, "utf8");
         savedFilePath = outputPath;
         logger.info({ path: outputPath }, "清理后的HTML内容已保存到文件");
-        
+
         // 保存网页截图
         // 生成截图文件名（基于HTML文件名，但扩展名为.png）
         const screenshotFilePath = outputPath.replace(/\.html$/, '.png');
-        
+
         // 截取整个页面的截图
         logger.info("正在截取网页截图...");
         await page.screenshot({
           path: screenshotFilePath,
           fullPage: true
         });
-        
+
         screenshotPath = screenshotFilePath;
         logger.info({ path: screenshotFilePath }, "网页截图已保存");
       }
@@ -1600,20 +1599,22 @@ export async function getGoogleSearchPageHtml(
   return performSearchAndGetHtml(useHeadless);
 }
 
-async function getFinalUrl(url: string): Promise<string | undefined> {
-  try {
-    const response = await fetch(url, {
-      redirect: 'manual', // Jangan ikuti redirect secara otomatis
-    });
+async function getFinalUrlWithPlaywright(targetUrl: string, browser: Browser): Promise<string | undefined> {
+  const context = await browser.newContext();
+  const page: Page = await context.newPage();
 
-    const location = response.headers.get('location');
-    if (location) {
-      console.log('Final URL:', location);
-      return location;
-    } else {
-      console.log('Tidak ada header redirect, status:', response.status);
-    }
+  try {
+    // Buka halaman dan tunggu hingga proses redirect selesai
+    await page.goto(targetUrl, { waitUntil: 'load' });
+
+    // Ambil URL terakhir setelah redirect
+    const finalUrl: string = page.url();
+    console.log('Final URL (Playwright):', finalUrl);
+
+    return finalUrl;
   } catch (error) {
-    console.error('Gagal memproses URL:', error);
+    console.error('Error saat navigasi:', error);
+  } finally {
+    await browser.close();
   }
 }
