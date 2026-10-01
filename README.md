@@ -4,7 +4,7 @@ A Playwright-based Node.js tool that bypasses search engine anti-scraping mechan
 
 [![Star History Chart](https://api.star-history.com/svg?repos=web-agent-master/google-search&type=Date)](https://star-history.com/#web-agent-master/google-search&Date)
 
-[中文文档](README.zh-CN.md)
+
 
 ## Key Features
 
@@ -37,7 +37,7 @@ A Playwright-based Node.js tool that bypasses search engine anti-scraping mechan
 
 ```bash
 # Install from source
-git clone https://github.com/web-agent-master/google-search.git
+git clone https://github.com/M22-AI/google-search.git
 cd google-search
 # Install dependencies
 npm install

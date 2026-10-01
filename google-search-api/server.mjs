@@ -522,7 +522,7 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 502, { error: `Search failed: ${underlying}`, query });
       }
 
-      if (Array.isArray(result.results) && RESOLVE_REDIRECTS) {
+      if (Array.isArray(result.results)) {
         await Promise.all(
           result.results.map(async (item) => {
             if (
