@@ -1,30 +1,17 @@
-FROM mcr.microsoft.com/playwright:v1.50.1-jammy
-
-ARG GOOGLE_SEARCH_REF=367aa01
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends git ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && npm install -g pnpm
+FROM mcr.microsoft.com/playwright:v1.63.0-jammy
 
 WORKDIR /app
-RUN git clone https://github.com/M22-AI/google-search.git \
-    && cd google-search \
-    && git checkout ${GOOGLE_SEARCH_REF}
-
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
-RUN cd google-search \
-    && pnpm install \
-    && pnpm build
+COPY package.json package-lock.json tsconfig.json ./
+RUN npm ci --ignore-scripts
 
-# --- APPLICATION RUNTIME ---
-WORKDIR /app/google-search
+COPY src ./src
+COPY bin ./bin
+COPY google-search-api ./google-search-api
+RUN npm run build
 
 ENV NODE_ENV=production
+ENV GOOGLE_SEARCH_DIR=/app
 
-# Expose port jika server.mjs membuka port tertentu (misal: 3000 atau port bawaannya)
-# EXPOSE 3000
-
-# Menjalankan file server.mjs sesuai struktur folder baru
 CMD ["node", "google-search-api/server.mjs"]
