@@ -790,7 +790,7 @@ export async function googleSearch(
       let results: SearchResult[] = []; // 在 evaluate 调用之前声明 results
 
       // 提取搜索结果 - 使用移植自 google-search-extractor.cjs 的逻辑
-      results = await page.evaluate((maxResults: number): SearchResult[] => { // 添加返回类型
+      results = await page.evaluate(async (maxResults: number): Promise<SearchResult[]> => { // 添加返回类型
         const results: { title: string; link: string; snippet: string }[] = [];
         const seenUrls = new Set<string>(); // 用于去重
 
@@ -892,7 +892,7 @@ export async function googleSearch(
                 if (!(el instanceof HTMLAnchorElement)) {
                     continue;
                 }
-                const link = el.href;
+                let link = el.href;
                 // 过滤掉导航链接、图片链接、已存在链接等
                 if (!link || seenUrls.has(link) || link.includes("google.com/") || link.includes("accounts.google") || link.includes("support.google")) {
                     continue;
@@ -912,6 +912,13 @@ export async function googleSearch(
                     break; // 找到合适的摘要就停止向上查找
                   }
                   parent = parent.parentElement;
+                }
+
+
+                // redirect google
+                const finalUrl = await getFinalUrl(link);
+                if (finalUrl) {
+                  link = finalUrl;
                 }
 
                 results.push({ title, link, snippet });
@@ -1591,4 +1598,22 @@ export async function getGoogleSearchPageHtml(
 
   // 首先尝试以无头模式执行
   return performSearchAndGetHtml(useHeadless);
+}
+
+async function getFinalUrl(url: string): Promise<string | undefined> {
+  try {
+    const response = await fetch(url, {
+      redirect: 'manual', // Jangan ikuti redirect secara otomatis
+    });
+
+    const location = response.headers.get('location');
+    if (location) {
+      console.log('Final URL:', location);
+      return location;
+    } else {
+      console.log('Tidak ada header redirect, status:', response.status);
+    }
+  } catch (error) {
+    console.error('Gagal memproses URL:', error);
+  }
 }
