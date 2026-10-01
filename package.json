@@ -14,15 +14,16 @@ RUN git clone https://github.com/web-agent-master/google-search.git \
 
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
-# Install dan build
+# Install, build, dan link secara global agar command CLI bisa diakses
 RUN cd google-search \
     && pnpm install \
-    && pnpm build
+    && pnpm build \
+    && pnpm link --global
 
-# --- APPLICATION RUNTIME (CLI MODE) ---
+# --- APPLICATION RUNTIME (MCP SERVER) ---
 WORKDIR /app/google-search
 
 ENV NODE_ENV=production
 
-# Masukkan query default di sini agar CLI tidak missing argument saat container start
-CMD ["node", "dist/src/index.js", "playwright typescript"]
+# Container utama tetap hidup menjalankan server MCP
+CMD ["node", "dist/src/mcp-server.js"]
