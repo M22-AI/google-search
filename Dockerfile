@@ -8,7 +8,7 @@ RUN apt-get update \
     && npm install -g pnpm
 
 WORKDIR /app
-RUN git clone https://github.com/web-agent-master/google-search.git \
+RUN git clone https://github.com/M22-AI/google-search.git \
     && cd google-search \
     && git checkout ${GOOGLE_SEARCH_REF}
 
