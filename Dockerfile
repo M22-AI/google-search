@@ -8,7 +8,7 @@ RUN apt-get update \
     && npm install -g pnpm
 
 WORKDIR /app
-RUN git clone https://github.com/web-agent-master/google-search.git \
+RUN git clone https://github.com/M22-AI/google-search.git \
     && cd google-search \
     && git checkout ${GOOGLE_SEARCH_REF}
 
@@ -17,13 +17,4 @@ RUN cd google-search \
     && pnpm install \
     && pnpm build
 
-# --- APPLICATION RUNTIME ---
-WORKDIR /app/google-search
 
-ENV NODE_ENV=production
-
-# Expose port jika aplikasi berjalan sebagai server (misal: port 3000)
-# EXPOSE 3000
-
-# Perintah untuk menjalankan aplikasi (sesuaikan script di package.json, misal: "start" atau "serve")
-CMD ["pnpm", "start"]
