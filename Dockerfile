@@ -13,5 +13,17 @@ RUN git clone https://github.com/web-agent-master/google-search.git \
     && git checkout ${GOOGLE_SEARCH_REF}
 
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-RUN pnpm install \
+RUN cd google-search \
+    && pnpm install \
     && pnpm build
+
+# --- APPLICATION RUNTIME ---
+WORKDIR /app/google-search
+
+ENV NODE_ENV=production
+
+# Expose port jika aplikasi berjalan sebagai server (misal: port 3000)
+# EXPOSE 3000
+
+# Perintah untuk menjalankan aplikasi (sesuaikan script di package.json, misal: "start" atau "serve")
+CMD ["pnpm", "start"]
