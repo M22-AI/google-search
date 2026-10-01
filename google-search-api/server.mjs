@@ -32,7 +32,7 @@ const MAX_TIMEOUT = parseInt(process.env.MAX_TIMEOUT || "120000", 10);
 
 const MODULE_DIR = path.resolve(
   process.env.GOOGLE_SEARCH_DIR ||
-    fileURLToPath(new URL("../google-search", import.meta.url))
+  fileURLToPath(new URL("../google-search", import.meta.url))
 );
 
 const [{ googleSearch, getGoogleSearchPageHtml }, { chromium }, { default: logger }] =
@@ -521,6 +521,26 @@ const server = http.createServer(async (req, res) => {
           : snippet;
         return sendJson(res, 502, { error: `Search failed: ${underlying}`, query });
       }
+
+      if (Array.isArray(result.results) && RESOLVE_REDIRECTS) {
+        await Promise.all(
+          result.results.map(async (item) => {
+            if (
+              item &&
+              typeof item.link === "string" &&
+              isGoogleRedirectWrapper(item.link)
+            ) {
+              item.link = await resolveGoogleRedirect(item.link);
+            }
+          })
+        );
+      } else if (Array.isArray(result.results)) {
+        for (const item of result.results) {
+          if (item && typeof item.link === "string") {
+            item.link = unwrapGoogleRedirect(item.link);
+          }
+        }
+      }
       return sendJson(res, 200, result);
     }
 
@@ -565,6 +585,75 @@ async function cleanup() {
     globalBrowser = undefined;
   }
 }
+
+
+function isGoogleFamilyHost(hostname) {
+  return /^(\w+\.)*(google\.[a-z.]+|doubleclick\.net|googleadservices\.com)$/.test(
+    hostname
+  );
+}
+
+function isGoogleRedirectWrapper(link) {
+  try {
+    const url = new URL(link);
+    return (
+      isGoogleFamilyHost(url.hostname) &&
+      (url.pathname === "/url" ||
+        url.pathname === "/goto" ||
+        url.pathname === "/aclk" ||
+        url.pathname.endsWith("/aclk"))
+    );
+  } catch {
+    return false;
+  }
+}
+
+function unwrapGoogleRedirect(link) {
+  if (!isGoogleRedirectWrapper(link)) return link;
+  try {
+    const url = new URL(link);
+    const target =
+      url.searchParams.get("q") ||
+      url.searchParams.get("url") ||
+      url.searchParams.get("adurl");
+    if (target && /^https?:\/\//i.test(target)) return target;
+  } catch { }
+  return link;
+}
+
+async function resolveGoogleRedirect(link) {
+  const embedded = unwrapGoogleRedirect(link);
+  if (embedded !== link) return embedded;
+  let current = link;
+  for (let hop = 0; hop < 4; hop++) {
+    let response;
+    try {
+      response = await fetch(current, {
+        method: "GET",
+        redirect: "manual",
+        signal: AbortSignal.timeout(2000),
+      });
+    } catch (error) {
+      console.error("Gagal menyelesaikan redirect", error);
+      return current;
+    }
+    try {
+      await response.body?.cancel();
+    } catch { }
+    const location = response.headers.get("location");
+    if (!(response.status >= 300 && response.status < 400) || !location) {
+      return current;
+    }
+    try {
+      current = new URL(location, current).href;
+    } catch {
+      return current;
+    }
+    if (!isGoogleFamilyHost(new URL(current).hostname)) return current;
+  }
+  return current;
+}
+
 
 async function main() {
   logger.info(
