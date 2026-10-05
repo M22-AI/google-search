@@ -236,6 +236,14 @@ export async function googleSearch(
       browser = await chromium.launch({
         headless,
         timeout: timeout * 2, // 增加浏览器启动超时时间
+        // 服务器（数据中心IP）常被Google直接封锁，可通过环境变量配置代理绕过
+        proxy: process.env.PROXY_SERVER
+          ? {
+              server: process.env.PROXY_SERVER,
+              username: process.env.PROXY_USERNAME || undefined,
+              password: process.env.PROXY_PASSWORD || undefined,
+            }
+          : undefined,
         args: [
           "--disable-blink-features=AutomationControlled",
           "--disable-features=IsolateOrigins,site-per-process",
@@ -530,12 +538,17 @@ export async function googleSearch(
       let resultsFound = false;
       for (const selector of searchResultSelectors) {
         try {
-          await page.waitForSelector(selector, { timeout: timeout / 2 });
+          await page.waitForSelector(selector, {
+            timeout: Math.min(timeout / 2, 15000),
+          });
           logger.info({ selector }, "找到搜索结果");
           resultsFound = true;
           break;
         } catch (e) {
-          // 继续尝试下一个选择器
+          // 选择器超时后先检查是否被重定向到人机验证页面，避免白等所有选择器
+          if (sorryPatterns.some((pattern) => page.url().includes(pattern))) {
+            break;
+          }
         }
       }
 
@@ -934,6 +947,14 @@ export async function getGoogleSearchPageHtml(
     browser = await chromium.launch({
       headless,
       timeout: timeout * 2, // 增加浏览器启动超时时间
+      // 服务器（数据中心IP）常被Google直接封锁，可通过环境变量配置代理绕过
+      proxy: process.env.PROXY_SERVER
+        ? {
+            server: process.env.PROXY_SERVER,
+            username: process.env.PROXY_USERNAME || undefined,
+            password: process.env.PROXY_PASSWORD || undefined,
+          }
+        : undefined,
       args: [
         "--disable-blink-features=AutomationControlled",
         "--disable-features=IsolateOrigins,site-per-process",
