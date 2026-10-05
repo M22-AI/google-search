@@ -28,7 +28,7 @@ function loadApiKeys() {
 
 const apiKeys = loadApiKeys();
 const MAX_CONCURRENCY = parseInt(process.env.SEARCH_CONCURRENCY || "2", 10);
-const MAX_TIMEOUT = parseInt(process.env.MAX_TIMEOUT || "180000", 10);
+const MAX_TIMEOUT = parseInt(process.env.MAX_TIMEOUT || "120000", 10);
 
 const MODULE_DIR = path.resolve(
   process.env.GOOGLE_SEARCH_DIR ||
@@ -318,7 +318,7 @@ const openapiSpec = {
           {
             name: "timeout",
             in: "query",
-            schema: { type: "integer", minimum: 1000, default: 180000 },
+            schema: { type: "integer", minimum: 1000, default: 60000 },
             description: "Search timeout in ms (capped by MAX_TIMEOUT env)",
           },
           {
@@ -350,7 +350,7 @@ const openapiSpec = {
                 properties: {
                   query: { type: "string" },
                   limit: { type: "integer", minimum: 1, maximum: 20, default: 10 },
-                  timeout: { type: "integer", minimum: 1000, default: 180000 },
+                  timeout: { type: "integer", minimum: 1000, default: 60000 },
                   locale: { type: "string" },
                 },
               },
@@ -502,7 +502,7 @@ const server = http.createServer(async (req, res) => {
           body.timeout ?? url.searchParams.get("timeout"),
           1000,
           MAX_TIMEOUT,
-          180000
+          60000
         ),
         stateFile: stateFilePath,
       };
@@ -670,15 +670,6 @@ async function main() {
 
   globalBrowser = await chromium.launch({
     headless: true,
-    // 代理：PROXY_SERVER/PROXY_USERNAME/PROXY_PASSWORD 环境变量
-    // （Railway -> ngrok -> 本地 tinyproxy -> 家用网络 -> Google）
-    proxy: process.env.PROXY_SERVER
-      ? {
-          server: process.env.PROXY_SERVER,
-          username: process.env.PROXY_USERNAME || undefined,
-          password: process.env.PROXY_PASSWORD || undefined,
-        }
-      : undefined,
     args: [
       "--disable-blink-features=AutomationControlled",
       "--disable-features=IsolateOrigins,site-per-process",
@@ -708,10 +699,7 @@ async function main() {
     ],
     ignoreDefaultArgs: ["--enable-automation"],
   });
-  logger.info(
-    { proxy: process.env.PROXY_SERVER || "not set (direct)" },
-    "Global browser instance initialized"
-  );
+  logger.info("Global browser instance initialized");
 
   server.listen(PORT, HOST, () => {
     logger.info(`Google Search API server listening: http://0.0.0.0:3000`);
