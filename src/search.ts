@@ -204,7 +204,21 @@ export async function googleSearch(
   };
 
   // 定义一个函数来执行搜索，可以重用于无头和有头模式
-  async function performSearch(headless: boolean): Promise<SearchResponse> {
+  async function performSearch(
+    headless: boolean,
+    attempt = 1,
+    maxAttempts = 3
+  ): Promise<SearchResponse> {
+    // 重试时先等待一段时间，避免立刻再次触发反机器人检测
+    if (attempt > 1) {
+      const backoffMs = 2000 * (attempt - 1);
+      logger.info(
+        { attempt },
+        `Retry attempt ${attempt}, waiting ${backoffMs}ms...`
+      );
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    }
+
     let browser: Browser;
     let browserWasProvided = false;
 
@@ -416,89 +430,16 @@ export async function googleSearch(
       );
 
       if (isBlockedPage) {
-        if (headless) {
-          logger.warn("检测到人机验证页面，将以有头模式重新启动浏览器...");
-
-          // 关闭当前页面和上下文
-          await page.close();
-          await context.close();
-
-          // 如果是外部提供的浏览器，不关闭它，而是创建一个新的浏览器实例
-          if (browserWasProvided) {
-            logger.info(
-              "使用外部浏览器实例时遇到人机验证，创建新的浏览器实例..."
-            );
-            // 创建一个新的浏览器实例，不再使用外部提供的实例
-            const newBrowser = await chromium.launch({
-              headless: false, // 使用有头模式
-              timeout: timeout * 2,
-              args: [
-                "--disable-blink-features=AutomationControlled",
-                // 其他参数与原来相同
-                "--disable-features=IsolateOrigins,site-per-process",
-                "--disable-site-isolation-trials",
-                "--disable-web-security",
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-accelerated-2d-canvas",
-                "--no-first-run",
-                "--no-zygote",
-                "--disable-gpu",
-                "--hide-scrollbars",
-                "--mute-audio",
-                "--disable-background-networking",
-                "--disable-background-timer-throttling",
-                "--disable-backgrounding-occluded-windows",
-                "--disable-breakpad",
-                "--disable-component-extensions-with-background-pages",
-                "--disable-extensions",
-                "--disable-features=TranslateUI",
-                "--disable-ipc-flooding-protection",
-                "--disable-renderer-backgrounding",
-                "--enable-features=NetworkService,NetworkServiceInProcess",
-                "--force-color-profile=srgb",
-                "--metrics-recording-only",
-              ],
-              ignoreDefaultArgs: ["--enable-automation"],
-            });
-
-            // 使用新的浏览器实例执行搜索
-            try {
-              const tempContext = await newBrowser.newContext(contextOptions);
-              const tempPage = await tempContext.newPage();
-
-              // 这里可以添加处理人机验证的代码
-              // ...
-
-              // 完成后关闭临时浏览器
-              await newBrowser.close();
-
-              // 重新执行搜索
-              return performSearch(false);
-            } catch (error) {
-              await newBrowser.close();
-              throw error;
-            }
-          } else {
-            // 如果不是外部提供的浏览器，直接关闭并重新执行搜索
-            await browser.close();
-            return performSearch(false); // 以有头模式重新执行搜索
-          }
-        } else {
-          logger.warn("检测到人机验证页面，请在浏览器中完成验证...");
-          // 等待用户完成验证并重定向回搜索页面
-          await page.waitForNavigation({
-            timeout: timeout * 2,
-            url: (url) => {
-              const urlStr = url.toString();
-              return sorryPatterns.every(
-                (pattern) => !urlStr.includes(pattern)
-              );
-            },
-          });
-          logger.info("人机验证已完成，继续搜索...");
+        await page.close();
+        await context.close();
+        if (!browserWasProvided) {
+          await browser.close();
         }
+        if (attempt < maxAttempts) {
+          logger.warn({ attempt }, "检测到人机验证页面，将以无头模式重试...");
+          return performSearch(true, attempt + 1, maxAttempts);
+        }
+        throw new Error(`Blocked by Google captcha after ${attempt} attempts`);
       }
 
       logger.info({ query }, "正在输入搜索关键词");
@@ -550,94 +491,16 @@ export async function googleSearch(
       );
 
       if (isBlockedAfterSearch) {
-        if (headless) {
-          logger.warn(
-            "搜索后检测到人机验证页面，将以有头模式重新启动浏览器..."
-          );
-
-          // 关闭当前页面和上下文
-          await page.close();
-          await context.close();
-
-          // 如果是外部提供的浏览器，不关闭它，而是创建一个新的浏览器实例
-          if (browserWasProvided) {
-            logger.info(
-              "使用外部浏览器实例时搜索后遇到人机验证，创建新的浏览器实例..."
-            );
-            // 创建一个新的浏览器实例，不再使用外部提供的实例
-            const newBrowser = await chromium.launch({
-              headless: false, // 使用有头模式
-              timeout: timeout * 2,
-              args: [
-                "--disable-blink-features=AutomationControlled",
-                // 其他参数与原来相同
-                "--disable-features=IsolateOrigins,site-per-process",
-                "--disable-site-isolation-trials",
-                "--disable-web-security",
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-accelerated-2d-canvas",
-                "--no-first-run",
-                "--no-zygote",
-                "--disable-gpu",
-                "--hide-scrollbars",
-                "--mute-audio",
-                "--disable-background-networking",
-                "--disable-background-timer-throttling",
-                "--disable-backgrounding-occluded-windows",
-                "--disable-breakpad",
-                "--disable-component-extensions-with-background-pages",
-                "--disable-extensions",
-                "--disable-features=TranslateUI",
-                "--disable-ipc-flooding-protection",
-                "--disable-renderer-backgrounding",
-                "--enable-features=NetworkService,NetworkServiceInProcess",
-                "--force-color-profile=srgb",
-                "--metrics-recording-only",
-              ],
-              ignoreDefaultArgs: ["--enable-automation"],
-            });
-
-            // 使用新的浏览器实例执行搜索
-            try {
-              const tempContext = await newBrowser.newContext(contextOptions);
-              const tempPage = await tempContext.newPage();
-
-              // 这里可以添加处理人机验证的代码
-              // ...
-
-              // 完成后关闭临时浏览器
-              await newBrowser.close();
-
-              // 重新执行搜索
-              return performSearch(false);
-            } catch (error) {
-              await newBrowser.close();
-              throw error;
-            }
-          } else {
-            // 如果不是外部提供的浏览器，直接关闭并重新执行搜索
-            await browser.close();
-            return performSearch(false); // 以有头模式重新执行搜索
-          }
-        } else {
-          logger.warn("搜索后检测到人机验证页面，请在浏览器中完成验证...");
-          // 等待用户完成验证并重定向回搜索页面
-          await page.waitForNavigation({
-            timeout: timeout * 2,
-            url: (url) => {
-              const urlStr = url.toString();
-              return sorryPatterns.every(
-                (pattern) => !urlStr.includes(pattern)
-              );
-            },
-          });
-          logger.info("人机验证已完成，继续搜索...");
-
-          // 等待页面重新加载
-          await page.waitForLoadState("networkidle", { timeout });
+        await page.close();
+        await context.close();
+        if (!browserWasProvided) {
+          await browser.close();
         }
+        if (attempt < maxAttempts) {
+          logger.warn({ attempt }, "搜索后检测到人机验证页面，将以无头模式重试...");
+          return performSearch(true, attempt + 1, maxAttempts);
+        }
+        throw new Error(`Blocked by Google captcha after search, ${attempt} attempts`);
       }
 
       logger.info({ url: page.url() }, "正在等待搜索结果加载...");
@@ -666,120 +529,30 @@ export async function googleSearch(
       if (!resultsFound) {
         // 如果找不到搜索结果，检查是否被重定向到人机验证页面
         const currentUrl = page.url();
-        const isBlockedDuringResults = sorryPatterns.some((pattern) =>
-          currentUrl.includes(pattern)
+        const isBlockedDuringResults = sorryPatterns.some(
+          (pattern) => currentUrl.includes(pattern)
         );
 
         if (isBlockedDuringResults) {
-          if (headless) {
-            logger.warn(
-              "等待搜索结果时检测到人机验证页面，将以有头模式重新启动浏览器..."
-            );
-
-            // 关闭当前页面和上下文
-            await page.close();
-            await context.close();
-
-            // 如果是外部提供的浏览器，不关闭它，而是创建一个新的浏览器实例
-            if (browserWasProvided) {
-              logger.info(
-                "使用外部浏览器实例时等待搜索结果遇到人机验证，创建新的浏览器实例..."
-              );
-              // 创建一个新的浏览器实例，不再使用外部提供的实例
-              const newBrowser = await chromium.launch({
-                headless: false, // 使用有头模式
-                timeout: timeout * 2,
-                args: [
-                  "--disable-blink-features=AutomationControlled",
-                  // 其他参数与原来相同
-                  "--disable-features=IsolateOrigins,site-per-process",
-                  "--disable-site-isolation-trials",
-                  "--disable-web-security",
-                  "--no-sandbox",
-                  "--disable-setuid-sandbox",
-                  "--disable-dev-shm-usage",
-                  "--disable-accelerated-2d-canvas",
-                  "--no-first-run",
-                  "--no-zygote",
-                  "--disable-gpu",
-                  "--hide-scrollbars",
-                  "--mute-audio",
-                  "--disable-background-networking",
-                  "--disable-background-timer-throttling",
-                  "--disable-backgrounding-occluded-windows",
-                  "--disable-breakpad",
-                  "--disable-component-extensions-with-background-pages",
-                  "--disable-extensions",
-                  "--disable-features=TranslateUI",
-                  "--disable-ipc-flooding-protection",
-                  "--disable-renderer-backgrounding",
-                  "--enable-features=NetworkService,NetworkServiceInProcess",
-                  "--force-color-profile=srgb",
-                  "--metrics-recording-only",
-                ],
-                ignoreDefaultArgs: ["--enable-automation"],
-              });
-
-              // 使用新的浏览器实例执行搜索
-              try {
-                const tempContext = await newBrowser.newContext(contextOptions);
-                const tempPage = await tempContext.newPage();
-
-                // 这里可以添加处理人机验证的代码
-                // ...
-
-                // 完成后关闭临时浏览器
-                await newBrowser.close();
-
-                // 重新执行搜索
-                return performSearch(false);
-              } catch (error) {
-                await newBrowser.close();
-                throw error;
-              }
-            } else {
-              // 如果不是外部提供的浏览器，直接关闭并重新执行搜索
-              await browser.close();
-              return performSearch(false); // 以有头模式重新执行搜索
-            }
-          } else {
-            logger.warn(
-              "等待搜索结果时检测到人机验证页面，请在浏览器中完成验证..."
-            );
-            // 等待用户完成验证并重定向回搜索页面
-            await page.waitForNavigation({
-              timeout: timeout * 2,
-              url: (url) => {
-                const urlStr = url.toString();
-                return sorryPatterns.every(
-                  (pattern) => !urlStr.includes(pattern)
-                );
-              },
-            });
-            logger.info("人机验证已完成，继续搜索...");
-
-            // 再次尝试等待搜索结果
-            for (const selector of searchResultSelectors) {
-              try {
-                await page.waitForSelector(selector, { timeout: timeout / 2 });
-                logger.info({ selector }, "验证后找到搜索结果");
-                resultsFound = true;
-                break;
-              } catch (e) {
-                // 继续尝试下一个选择器
-              }
-            }
-
-            if (!resultsFound) {
-              logger.error("无法找到搜索结果元素");
-              throw new Error("无法找到搜索结果元素");
-            }
+          await page.close();
+          await context.close();
+          if (!browserWasProvided) {
+            await browser.close();
           }
-        } else {
-          // 如果不是人机验证问题，则抛出错误
-          logger.error("无法找到搜索结果元素");
-          throw new Error("无法找到搜索结果元素");
+          if (attempt < maxAttempts) {
+            logger.warn(
+              { attempt },
+              "等待结果时检测到人机验证页面，将以无头模式重试..."
+            );
+            return performSearch(true, attempt + 1, maxAttempts);
+          }
+          throw new Error(
+            `Blocked by Google captcha while waiting for results, ${attempt} attempts`
+          );
         }
+        // 不是人机验证问题，直接抛出错误，不再重试
+        logger.error("无法找到搜索结果元素");
+        throw new Error("无法找到搜索结果元素");
       }
 
       // 减少等待时间
@@ -1127,7 +900,21 @@ export async function getGoogleSearchPageHtml(
   };
 
   // 定义一个专门的函数来获取HTML
-  async function performSearchAndGetHtml(headless: boolean): Promise<HtmlResponse> {
+  async function performSearchAndGetHtml(
+    headless: boolean,
+    attempt = 1,
+    maxAttempts = 3
+  ): Promise<HtmlResponse> {
+    // 重试时先等待一段时间，避免立刻再次触发反机器人检测
+    if (attempt > 1) {
+      const backoffMs = 2000 * (attempt - 1);
+      logger.info(
+        { attempt },
+        `Retry HTML fetch attempt ${attempt}, waiting ${backoffMs}ms...`
+      );
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    }
+
     let browser: Browser;
 
     // 初始化浏览器，添加更多参数以避免检测
@@ -1327,30 +1114,14 @@ export async function getGoogleSearchPageHtml(
       );
 
       if (isBlockedPage) {
-        if (headless) {
-          logger.warn("检测到人机验证页面，将以有头模式重新启动浏览器...");
-
-          // 关闭当前页面和上下文
-          await page.close();
-          await context.close();
-          await browser.close();
-
-          // 以有头模式重新执行
-          return performSearchAndGetHtml(false);
-        } else {
-          logger.warn("检测到人机验证页面，请在浏览器中完成验证...");
-          // 等待用户完成验证并重定向回搜索页面
-          await page.waitForNavigation({
-            timeout: timeout * 2,
-            url: (url) => {
-              const urlStr = url.toString();
-              return sorryPatterns.every(
-                (pattern) => !urlStr.includes(pattern)
-              );
-            },
-          });
-          logger.info("人机验证已完成，继续搜索...");
+        await page.close();
+        await context.close();
+        await browser.close();
+        if (attempt < maxAttempts) {
+          logger.warn({ attempt }, "检测到人机验证页面，将以无头模式重试...");
+          return performSearchAndGetHtml(true, attempt + 1, maxAttempts);
         }
+        throw new Error(`Blocked by Google captcha after ${attempt} attempts`);
       }
 
       logger.info({ query }, "正在输入搜索关键词");
@@ -1402,33 +1173,14 @@ export async function getGoogleSearchPageHtml(
       );
 
       if (isBlockedAfterSearch) {
-        if (headless) {
-          logger.warn("搜索后检测到人机验证页面，将以有头模式重新启动浏览器...");
-
-          // 关闭当前页面和上下文
-          await page.close();
-          await context.close();
-          await browser.close();
-
-          // 以有头模式重新执行
-          return performSearchAndGetHtml(false);
-        } else {
-          logger.warn("搜索后检测到人机验证页面，请在浏览器中完成验证...");
-          // 等待用户完成验证并重定向回搜索页面
-          await page.waitForNavigation({
-            timeout: timeout * 2,
-            url: (url) => {
-              const urlStr = url.toString();
-              return sorryPatterns.every(
-                (pattern) => !urlStr.includes(pattern)
-              );
-            },
-          });
-          logger.info("人机验证已完成，继续搜索...");
-
-          // 等待页面重新加载
-          await page.waitForLoadState("networkidle", { timeout });
+        await page.close();
+        await context.close();
+        await browser.close();
+        if (attempt < maxAttempts) {
+          logger.warn({ attempt }, "搜索后检测到人机验证页面，将以无头模式重试...");
+          return performSearchAndGetHtml(true, attempt + 1, maxAttempts);
         }
+        throw new Error(`Blocked by Google captcha after search, ${attempt} attempts`);
       }
 
       // 获取当前页面URL
