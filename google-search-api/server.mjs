@@ -670,6 +670,15 @@ async function main() {
 
   globalBrowser = await chromium.launch({
     headless: true,
+    // 代理：PROXY_SERVER/PROXY_USERNAME/PROXY_PASSWORD 环境变量
+    // （Railway -> ngrok -> 本地 tinyproxy -> 家用网络 -> Google）
+    proxy: process.env.PROXY_SERVER
+      ? {
+          server: process.env.PROXY_SERVER,
+          username: process.env.PROXY_USERNAME || undefined,
+          password: process.env.PROXY_PASSWORD || undefined,
+        }
+      : undefined,
     args: [
       "--disable-blink-features=AutomationControlled",
       "--disable-features=IsolateOrigins,site-per-process",
@@ -699,7 +708,10 @@ async function main() {
     ],
     ignoreDefaultArgs: ["--enable-automation"],
   });
-  logger.info("Global browser instance initialized");
+  logger.info(
+    { proxy: process.env.PROXY_SERVER || "not set (direct)" },
+    "Global browser instance initialized"
+  );
 
   server.listen(PORT, HOST, () => {
     logger.info(`Google Search API server listening: http://0.0.0.0:3000`);
