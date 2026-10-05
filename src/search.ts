@@ -172,12 +172,7 @@ export async function googleSearch(
   ];
 
   // Google域名列表
-  const googleDomains = [
-    "https://www.google.com",
-    "https://www.google.co.uk",
-    "https://www.google.ca",
-    "https://www.google.com.au",
-  ];
+  const googleDomains = ["https://www.google.com",];
 
   // 获取随机设备配置或使用保存的配置
   const getDeviceConfig = (): [string, any] => {
@@ -916,12 +911,7 @@ export async function getGoogleSearchPageHtml(
   ];
 
   // Google域名列表
-  const googleDomains = [
-    "https://www.google.com",
-    "https://www.google.co.uk",
-    "https://www.google.ca",
-    "https://www.google.com.au",
-  ];
+  const googleDomains = ["https://www.google.com",];
 
   // 获取随机设备配置或使用保存的配置
   const getDeviceConfig = (): [string, any] => {
