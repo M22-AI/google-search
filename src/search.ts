@@ -228,7 +228,10 @@ export async function googleSearch(
       logger.info("使用已存在的浏览器实例");
     } else {
       logger.info(
-        { headless },
+        {
+          headless,
+          proxy: process.env.PROXY_SERVER || "direct (no proxy set)",
+        },
         `准备以${headless ? "无头" : "有头"}模式启动浏览器...`
       );
 
@@ -362,6 +365,19 @@ export async function googleSearch(
         })
       )
     );
+
+    // 记录当前出口IP，确认代理是否生效（Google实际看到的就是这个IP）
+    try {
+      const ipResponse = await context.request.get(
+        "https://api.ipify.org?format=json"
+      );
+      logger.info(
+        { egressIp: await ipResponse.text() },
+        "当前出口IP (egress IP)"
+      );
+    } catch (ipError) {
+      logger.warn({ detail: String(ipError) }, "无法获取出口IP");
+    }
 
     // 设置额外的浏览器属性以避免检测
     await context.addInitScript(() => {
@@ -769,7 +785,13 @@ export async function googleSearch(
         results, // 现在 results 在这个作用域内是可访问的
       };
     } catch (error) {
-      logger.error({ error }, "搜索过程中发生错误");
+      logger.error(
+        {
+          error,
+          message: error instanceof Error ? error.message : String(error),
+        },
+        "搜索过程中发生错误"
+      );
 
       try {
         // 尝试保存浏览器状态，即使发生错误
@@ -1072,6 +1094,19 @@ export async function getGoogleSearchPageHtml(
         })
       )
     );
+
+    // 记录当前出口IP，确认代理是否生效（Google实际看到的就是这个IP）
+    try {
+      const ipResponse = await context.request.get(
+        "https://api.ipify.org?format=json"
+      );
+      logger.info(
+        { egressIp: await ipResponse.text() },
+        "当前出口IP (egress IP)"
+      );
+    } catch (ipError) {
+      logger.warn({ detail: String(ipError) }, "无法获取出口IP");
+    }
 
     // 设置额外的浏览器属性以避免检测
     await context.addInitScript(() => {
