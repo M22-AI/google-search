@@ -172,7 +172,12 @@ export async function googleSearch(
   ];
 
   // Google域名列表
-  const googleDomains = ["https://www.google.com",];
+  const googleDomains = [
+    "https://www.google.com",
+    "https://www.google.co.uk",
+    "https://www.google.ca",
+    "https://www.google.com.au",
+  ];
 
   // 获取随机设备配置或使用保存的配置
   const getDeviceConfig = (): [string, any] => {
@@ -199,21 +204,7 @@ export async function googleSearch(
   };
 
   // 定义一个函数来执行搜索，可以重用于无头和有头模式
-  async function performSearch(
-    headless: boolean,
-    attempt = 1,
-    maxAttempts = 3
-  ): Promise<SearchResponse> {
-    // 重试时先等待一段时间，避免立刻再次触发反机器人检测
-    if (attempt > 1) {
-      const backoffMs = 2000 * (attempt - 1);
-      logger.info(
-        { attempt },
-        `Retry attempt ${attempt}, waiting ${backoffMs}ms...`
-      );
-      await new Promise((resolve) => setTimeout(resolve, backoffMs));
-    }
-
+  async function performSearch(headless: boolean): Promise<SearchResponse> {
     let browser: Browser;
     let browserWasProvided = false;
 
@@ -223,10 +214,7 @@ export async function googleSearch(
       logger.info("使用已存在的浏览器实例");
     } else {
       logger.info(
-        {
-          headless,
-          proxy: process.env.PROXY_SERVER || "direct (no proxy set)",
-        },
+        { headless },
         `准备以${headless ? "无头" : "有头"}模式启动浏览器...`
       );
 
@@ -234,14 +222,6 @@ export async function googleSearch(
       browser = await chromium.launch({
         headless,
         timeout: timeout * 2, // 增加浏览器启动超时时间
-        // 服务器（数据中心IP）常被Google直接封锁，可通过环境变量配置代理绕过
-        proxy: process.env.PROXY_SERVER
-          ? {
-              server: process.env.PROXY_SERVER,
-              username: process.env.PROXY_USERNAME || undefined,
-              password: process.env.PROXY_PASSWORD || undefined,
-            }
-          : undefined,
         args: [
           "--disable-blink-features=AutomationControlled",
           "--disable-features=IsolateOrigins,site-per-process",
@@ -348,32 +328,6 @@ export async function googleSearch(
       storageState ? { ...contextOptions, storageState } : contextOptions
     );
 
-    // 预设SOCS同意cookie，防止欧盟地区IP触发Google Cookie同意对话框拦截点击
-    // （对话框会覆盖搜索框，导致 element click 超时，见 LSCOAf/gowsYd 报错）
-    await context.addCookies(
-      [".google.com", ".google.ca", ".google.co.uk", ".google.com.au"].map(
-        (domain) => ({
-          name: "SOCS",
-          value: "CAESEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg",
-          domain,
-          path: "/",
-        })
-      )
-    );
-
-    // 记录当前出口IP，确认代理是否生效（Google实际看到的就是这个IP）
-    try {
-      const ipResponse = await context.request.get(
-        "https://api.ipify.org?format=json"
-      );
-      logger.info(
-        { egressIp: await ipResponse.text() },
-        "当前出口IP (egress IP)"
-      );
-    } catch (ipError) {
-      logger.warn({ detail: String(ipError) }, "无法获取出口IP");
-    }
-
     // 设置额外的浏览器属性以避免检测
     await context.addInitScript(() => {
       // 覆盖 navigator 属性
@@ -442,7 +396,7 @@ export async function googleSearch(
       // 访问Google搜索页面
       const response = await page.goto(selectedDomain, {
         timeout,
-        waitUntil: "domcontentloaded",
+        waitUntil: "networkidle",
       });
 
       // 检查是否被重定向到人机验证页面
@@ -462,16 +416,89 @@ export async function googleSearch(
       );
 
       if (isBlockedPage) {
-        await page.close();
-        await context.close();
-        if (!browserWasProvided) {
-          await browser.close();
+        if (headless) {
+          logger.warn("检测到人机验证页面，将以有头模式重新启动浏览器...");
+
+          // 关闭当前页面和上下文
+          await page.close();
+          await context.close();
+
+          // 如果是外部提供的浏览器，不关闭它，而是创建一个新的浏览器实例
+          if (browserWasProvided) {
+            logger.info(
+              "使用外部浏览器实例时遇到人机验证，创建新的浏览器实例..."
+            );
+            // 创建一个新的浏览器实例，不再使用外部提供的实例
+            const newBrowser = await chromium.launch({
+              headless: false, // 使用有头模式
+              timeout: timeout * 2,
+              args: [
+                "--disable-blink-features=AutomationControlled",
+                // 其他参数与原来相同
+                "--disable-features=IsolateOrigins,site-per-process",
+                "--disable-site-isolation-trials",
+                "--disable-web-security",
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-accelerated-2d-canvas",
+                "--no-first-run",
+                "--no-zygote",
+                "--disable-gpu",
+                "--hide-scrollbars",
+                "--mute-audio",
+                "--disable-background-networking",
+                "--disable-background-timer-throttling",
+                "--disable-backgrounding-occluded-windows",
+                "--disable-breakpad",
+                "--disable-component-extensions-with-background-pages",
+                "--disable-extensions",
+                "--disable-features=TranslateUI",
+                "--disable-ipc-flooding-protection",
+                "--disable-renderer-backgrounding",
+                "--enable-features=NetworkService,NetworkServiceInProcess",
+                "--force-color-profile=srgb",
+                "--metrics-recording-only",
+              ],
+              ignoreDefaultArgs: ["--enable-automation"],
+            });
+
+            // 使用新的浏览器实例执行搜索
+            try {
+              const tempContext = await newBrowser.newContext(contextOptions);
+              const tempPage = await tempContext.newPage();
+
+              // 这里可以添加处理人机验证的代码
+              // ...
+
+              // 完成后关闭临时浏览器
+              await newBrowser.close();
+
+              // 重新执行搜索
+              return performSearch(false);
+            } catch (error) {
+              await newBrowser.close();
+              throw error;
+            }
+          } else {
+            // 如果不是外部提供的浏览器，直接关闭并重新执行搜索
+            await browser.close();
+            return performSearch(false); // 以有头模式重新执行搜索
+          }
+        } else {
+          logger.warn("检测到人机验证页面，请在浏览器中完成验证...");
+          // 等待用户完成验证并重定向回搜索页面
+          await page.waitForNavigation({
+            timeout: timeout * 2,
+            url: (url) => {
+              const urlStr = url.toString();
+              return sorryPatterns.every(
+                (pattern) => !urlStr.includes(pattern)
+              );
+            },
+          });
+          logger.info("人机验证已完成，继续搜索...");
         }
-        if (attempt < maxAttempts) {
-          logger.warn({ attempt }, "检测到人机验证页面，将以无头模式重试...");
-          return performSearch(true, attempt + 1, maxAttempts);
-        }
-        throw new Error(`Blocked by Google captcha after ${attempt} attempts`);
       }
 
       logger.info({ query }, "正在输入搜索关键词");
@@ -514,7 +541,7 @@ export async function googleSearch(
       logger.info("正在等待页面加载完成...");
 
       // 等待页面加载完成
-      await page.waitForLoadState("domcontentloaded", { timeout });
+      await page.waitForLoadState("networkidle", { timeout });
 
       // 检查搜索后的URL是否被重定向到人机验证页面
       const searchUrl = page.url();
@@ -523,16 +550,94 @@ export async function googleSearch(
       );
 
       if (isBlockedAfterSearch) {
-        await page.close();
-        await context.close();
-        if (!browserWasProvided) {
-          await browser.close();
+        if (headless) {
+          logger.warn(
+            "搜索后检测到人机验证页面，将以有头模式重新启动浏览器..."
+          );
+
+          // 关闭当前页面和上下文
+          await page.close();
+          await context.close();
+
+          // 如果是外部提供的浏览器，不关闭它，而是创建一个新的浏览器实例
+          if (browserWasProvided) {
+            logger.info(
+              "使用外部浏览器实例时搜索后遇到人机验证，创建新的浏览器实例..."
+            );
+            // 创建一个新的浏览器实例，不再使用外部提供的实例
+            const newBrowser = await chromium.launch({
+              headless: false, // 使用有头模式
+              timeout: timeout * 2,
+              args: [
+                "--disable-blink-features=AutomationControlled",
+                // 其他参数与原来相同
+                "--disable-features=IsolateOrigins,site-per-process",
+                "--disable-site-isolation-trials",
+                "--disable-web-security",
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-accelerated-2d-canvas",
+                "--no-first-run",
+                "--no-zygote",
+                "--disable-gpu",
+                "--hide-scrollbars",
+                "--mute-audio",
+                "--disable-background-networking",
+                "--disable-background-timer-throttling",
+                "--disable-backgrounding-occluded-windows",
+                "--disable-breakpad",
+                "--disable-component-extensions-with-background-pages",
+                "--disable-extensions",
+                "--disable-features=TranslateUI",
+                "--disable-ipc-flooding-protection",
+                "--disable-renderer-backgrounding",
+                "--enable-features=NetworkService,NetworkServiceInProcess",
+                "--force-color-profile=srgb",
+                "--metrics-recording-only",
+              ],
+              ignoreDefaultArgs: ["--enable-automation"],
+            });
+
+            // 使用新的浏览器实例执行搜索
+            try {
+              const tempContext = await newBrowser.newContext(contextOptions);
+              const tempPage = await tempContext.newPage();
+
+              // 这里可以添加处理人机验证的代码
+              // ...
+
+              // 完成后关闭临时浏览器
+              await newBrowser.close();
+
+              // 重新执行搜索
+              return performSearch(false);
+            } catch (error) {
+              await newBrowser.close();
+              throw error;
+            }
+          } else {
+            // 如果不是外部提供的浏览器，直接关闭并重新执行搜索
+            await browser.close();
+            return performSearch(false); // 以有头模式重新执行搜索
+          }
+        } else {
+          logger.warn("搜索后检测到人机验证页面，请在浏览器中完成验证...");
+          // 等待用户完成验证并重定向回搜索页面
+          await page.waitForNavigation({
+            timeout: timeout * 2,
+            url: (url) => {
+              const urlStr = url.toString();
+              return sorryPatterns.every(
+                (pattern) => !urlStr.includes(pattern)
+              );
+            },
+          });
+          logger.info("人机验证已完成，继续搜索...");
+
+          // 等待页面重新加载
+          await page.waitForLoadState("networkidle", { timeout });
         }
-        if (attempt < maxAttempts) {
-          logger.warn({ attempt }, "搜索后检测到人机验证页面，将以无头模式重试...");
-          return performSearch(true, attempt + 1, maxAttempts);
-        }
-        throw new Error(`Blocked by Google captcha after search, ${attempt} attempts`);
       }
 
       logger.info({ url: page.url() }, "正在等待搜索结果加载...");
@@ -549,47 +654,132 @@ export async function googleSearch(
       let resultsFound = false;
       for (const selector of searchResultSelectors) {
         try {
-          await page.waitForSelector(selector, {
-            timeout: Math.min(timeout / 2, 15000),
-          });
+          await page.waitForSelector(selector, { timeout: timeout / 2 });
           logger.info({ selector }, "找到搜索结果");
           resultsFound = true;
           break;
         } catch (e) {
-          // 选择器超时后先检查是否被重定向到人机验证页面，避免白等所有选择器
-          if (sorryPatterns.some((pattern) => page.url().includes(pattern))) {
-            break;
-          }
+          // 继续尝试下一个选择器
         }
       }
 
       if (!resultsFound) {
         // 如果找不到搜索结果，检查是否被重定向到人机验证页面
         const currentUrl = page.url();
-        const isBlockedDuringResults = sorryPatterns.some(
-          (pattern) => currentUrl.includes(pattern)
+        const isBlockedDuringResults = sorryPatterns.some((pattern) =>
+          currentUrl.includes(pattern)
         );
 
         if (isBlockedDuringResults) {
-          await page.close();
-          await context.close();
-          if (!browserWasProvided) {
-            await browser.close();
-          }
-          if (attempt < maxAttempts) {
+          if (headless) {
             logger.warn(
-              { attempt },
-              "等待结果时检测到人机验证页面，将以无头模式重试..."
+              "等待搜索结果时检测到人机验证页面，将以有头模式重新启动浏览器..."
             );
-            return performSearch(true, attempt + 1, maxAttempts);
+
+            // 关闭当前页面和上下文
+            await page.close();
+            await context.close();
+
+            // 如果是外部提供的浏览器，不关闭它，而是创建一个新的浏览器实例
+            if (browserWasProvided) {
+              logger.info(
+                "使用外部浏览器实例时等待搜索结果遇到人机验证，创建新的浏览器实例..."
+              );
+              // 创建一个新的浏览器实例，不再使用外部提供的实例
+              const newBrowser = await chromium.launch({
+                headless: false, // 使用有头模式
+                timeout: timeout * 2,
+                args: [
+                  "--disable-blink-features=AutomationControlled",
+                  // 其他参数与原来相同
+                  "--disable-features=IsolateOrigins,site-per-process",
+                  "--disable-site-isolation-trials",
+                  "--disable-web-security",
+                  "--no-sandbox",
+                  "--disable-setuid-sandbox",
+                  "--disable-dev-shm-usage",
+                  "--disable-accelerated-2d-canvas",
+                  "--no-first-run",
+                  "--no-zygote",
+                  "--disable-gpu",
+                  "--hide-scrollbars",
+                  "--mute-audio",
+                  "--disable-background-networking",
+                  "--disable-background-timer-throttling",
+                  "--disable-backgrounding-occluded-windows",
+                  "--disable-breakpad",
+                  "--disable-component-extensions-with-background-pages",
+                  "--disable-extensions",
+                  "--disable-features=TranslateUI",
+                  "--disable-ipc-flooding-protection",
+                  "--disable-renderer-backgrounding",
+                  "--enable-features=NetworkService,NetworkServiceInProcess",
+                  "--force-color-profile=srgb",
+                  "--metrics-recording-only",
+                ],
+                ignoreDefaultArgs: ["--enable-automation"],
+              });
+
+              // 使用新的浏览器实例执行搜索
+              try {
+                const tempContext = await newBrowser.newContext(contextOptions);
+                const tempPage = await tempContext.newPage();
+
+                // 这里可以添加处理人机验证的代码
+                // ...
+
+                // 完成后关闭临时浏览器
+                await newBrowser.close();
+
+                // 重新执行搜索
+                return performSearch(false);
+              } catch (error) {
+                await newBrowser.close();
+                throw error;
+              }
+            } else {
+              // 如果不是外部提供的浏览器，直接关闭并重新执行搜索
+              await browser.close();
+              return performSearch(false); // 以有头模式重新执行搜索
+            }
+          } else {
+            logger.warn(
+              "等待搜索结果时检测到人机验证页面，请在浏览器中完成验证..."
+            );
+            // 等待用户完成验证并重定向回搜索页面
+            await page.waitForNavigation({
+              timeout: timeout * 2,
+              url: (url) => {
+                const urlStr = url.toString();
+                return sorryPatterns.every(
+                  (pattern) => !urlStr.includes(pattern)
+                );
+              },
+            });
+            logger.info("人机验证已完成，继续搜索...");
+
+            // 再次尝试等待搜索结果
+            for (const selector of searchResultSelectors) {
+              try {
+                await page.waitForSelector(selector, { timeout: timeout / 2 });
+                logger.info({ selector }, "验证后找到搜索结果");
+                resultsFound = true;
+                break;
+              } catch (e) {
+                // 继续尝试下一个选择器
+              }
+            }
+
+            if (!resultsFound) {
+              logger.error("无法找到搜索结果元素");
+              throw new Error("无法找到搜索结果元素");
+            }
           }
-          throw new Error(
-            `Blocked by Google captcha while waiting for results, ${attempt} attempts`
-          );
+        } else {
+          // 如果不是人机验证问题，则抛出错误
+          logger.error("无法找到搜索结果元素");
+          throw new Error("无法找到搜索结果元素");
         }
-        // 不是人机验证问题，直接抛出错误，不再重试
-        logger.error("无法找到搜索结果元素");
-        throw new Error("无法找到搜索结果元素");
       }
 
       // 减少等待时间
@@ -780,13 +970,7 @@ export async function googleSearch(
         results, // 现在 results 在这个作用域内是可访问的
       };
     } catch (error) {
-      logger.error(
-        {
-          error,
-          message: error instanceof Error ? error.message : String(error),
-        },
-        "搜索过程中发生错误"
-      );
+      logger.error({ error }, "搜索过程中发生错误");
 
       try {
         // 尝试保存浏览器状态，即使发生错误
@@ -911,7 +1095,12 @@ export async function getGoogleSearchPageHtml(
   ];
 
   // Google域名列表
-  const googleDomains = ["https://www.google.com",];
+  const googleDomains = [
+    "https://www.google.com",
+    "https://www.google.co.uk",
+    "https://www.google.ca",
+    "https://www.google.com.au",
+  ];
 
   // 获取随机设备配置或使用保存的配置
   const getDeviceConfig = (): [string, any] => {
@@ -938,35 +1127,13 @@ export async function getGoogleSearchPageHtml(
   };
 
   // 定义一个专门的函数来获取HTML
-  async function performSearchAndGetHtml(
-    headless: boolean,
-    attempt = 1,
-    maxAttempts = 3
-  ): Promise<HtmlResponse> {
-    // 重试时先等待一段时间，避免立刻再次触发反机器人检测
-    if (attempt > 1) {
-      const backoffMs = 2000 * (attempt - 1);
-      logger.info(
-        { attempt },
-        `Retry HTML fetch attempt ${attempt}, waiting ${backoffMs}ms...`
-      );
-      await new Promise((resolve) => setTimeout(resolve, backoffMs));
-    }
-
+  async function performSearchAndGetHtml(headless: boolean): Promise<HtmlResponse> {
     let browser: Browser;
 
     // 初始化浏览器，添加更多参数以避免检测
     browser = await chromium.launch({
       headless,
       timeout: timeout * 2, // 增加浏览器启动超时时间
-      // 服务器（数据中心IP）常被Google直接封锁，可通过环境变量配置代理绕过
-      proxy: process.env.PROXY_SERVER
-        ? {
-            server: process.env.PROXY_SERVER,
-            username: process.env.PROXY_USERNAME || undefined,
-            password: process.env.PROXY_PASSWORD || undefined,
-          }
-        : undefined,
       args: [
         "--disable-blink-features=AutomationControlled",
         "--disable-features=IsolateOrigins,site-per-process",
@@ -1072,32 +1239,6 @@ export async function getGoogleSearchPageHtml(
       storageState ? { ...contextOptions, storageState } : contextOptions
     );
 
-    // 预设SOCS同意cookie，防止欧盟地区IP触发Google Cookie同意对话框拦截点击
-    // （对话框会覆盖搜索框，导致 element click 超时，见 LSCOAf/gowsYd 报错）
-    await context.addCookies(
-      [".google.com", ".google.ca", ".google.co.uk", ".google.com.au"].map(
-        (domain) => ({
-          name: "SOCS",
-          value: "CAESEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg",
-          domain,
-          path: "/",
-        })
-      )
-    );
-
-    // 记录当前出口IP，确认代理是否生效（Google实际看到的就是这个IP）
-    try {
-      const ipResponse = await context.request.get(
-        "https://api.ipify.org?format=json"
-      );
-      logger.info(
-        { egressIp: await ipResponse.text() },
-        "当前出口IP (egress IP)"
-      );
-    } catch (ipError) {
-      logger.warn({ detail: String(ipError) }, "无法获取出口IP");
-    }
-
     // 设置额外的浏览器属性以避免检测
     await context.addInitScript(() => {
       // 覆盖 navigator 属性
@@ -1166,7 +1307,7 @@ export async function getGoogleSearchPageHtml(
       // 访问Google搜索页面
       const response = await page.goto(selectedDomain, {
         timeout,
-        waitUntil: "domcontentloaded",
+        waitUntil: "networkidle",
       });
 
       // 检查是否被重定向到人机验证页面
@@ -1186,14 +1327,30 @@ export async function getGoogleSearchPageHtml(
       );
 
       if (isBlockedPage) {
-        await page.close();
-        await context.close();
-        await browser.close();
-        if (attempt < maxAttempts) {
-          logger.warn({ attempt }, "检测到人机验证页面，将以无头模式重试...");
-          return performSearchAndGetHtml(true, attempt + 1, maxAttempts);
+        if (headless) {
+          logger.warn("检测到人机验证页面，将以有头模式重新启动浏览器...");
+
+          // 关闭当前页面和上下文
+          await page.close();
+          await context.close();
+          await browser.close();
+
+          // 以有头模式重新执行
+          return performSearchAndGetHtml(false);
+        } else {
+          logger.warn("检测到人机验证页面，请在浏览器中完成验证...");
+          // 等待用户完成验证并重定向回搜索页面
+          await page.waitForNavigation({
+            timeout: timeout * 2,
+            url: (url) => {
+              const urlStr = url.toString();
+              return sorryPatterns.every(
+                (pattern) => !urlStr.includes(pattern)
+              );
+            },
+          });
+          logger.info("人机验证已完成，继续搜索...");
         }
-        throw new Error(`Blocked by Google captcha after ${attempt} attempts`);
       }
 
       logger.info({ query }, "正在输入搜索关键词");
@@ -1236,7 +1393,7 @@ export async function getGoogleSearchPageHtml(
       logger.info("正在等待搜索结果页面加载完成...");
 
       // 等待页面加载完成
-      await page.waitForLoadState("domcontentloaded", { timeout });
+      await page.waitForLoadState("networkidle", { timeout });
 
       // 检查搜索后的URL是否被重定向到人机验证页面
       const searchUrl = page.url();
@@ -1245,14 +1402,33 @@ export async function getGoogleSearchPageHtml(
       );
 
       if (isBlockedAfterSearch) {
-        await page.close();
-        await context.close();
-        await browser.close();
-        if (attempt < maxAttempts) {
-          logger.warn({ attempt }, "搜索后检测到人机验证页面，将以无头模式重试...");
-          return performSearchAndGetHtml(true, attempt + 1, maxAttempts);
+        if (headless) {
+          logger.warn("搜索后检测到人机验证页面，将以有头模式重新启动浏览器...");
+
+          // 关闭当前页面和上下文
+          await page.close();
+          await context.close();
+          await browser.close();
+
+          // 以有头模式重新执行
+          return performSearchAndGetHtml(false);
+        } else {
+          logger.warn("搜索后检测到人机验证页面，请在浏览器中完成验证...");
+          // 等待用户完成验证并重定向回搜索页面
+          await page.waitForNavigation({
+            timeout: timeout * 2,
+            url: (url) => {
+              const urlStr = url.toString();
+              return sorryPatterns.every(
+                (pattern) => !urlStr.includes(pattern)
+              );
+            },
+          });
+          logger.info("人机验证已完成，继续搜索...");
+
+          // 等待页面重新加载
+          await page.waitForLoadState("networkidle", { timeout });
         }
-        throw new Error(`Blocked by Google captcha after search, ${attempt} attempts`);
       }
 
       // 获取当前页面URL
@@ -1264,7 +1440,7 @@ export async function getGoogleSearchPageHtml(
       await page.waitForTimeout(1000); // 等待1秒，让页面完全稳定
 
       // 再次等待网络空闲，确保所有异步操作完成
-      await page.waitForLoadState("domcontentloaded", { timeout });
+      await page.waitForLoadState("networkidle", { timeout });
 
       // 获取页面HTML内容
       const fullHtml = await page.content();
