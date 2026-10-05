@@ -447,7 +447,7 @@ export async function googleSearch(
       // 访问Google搜索页面
       const response = await page.goto(selectedDomain, {
         timeout,
-        waitUntil: "networkidle",
+        waitUntil: "domcontentloaded",
       });
 
       // 检查是否被重定向到人机验证页面
@@ -519,7 +519,7 @@ export async function googleSearch(
       logger.info("正在等待页面加载完成...");
 
       // 等待页面加载完成
-      await page.waitForLoadState("networkidle", { timeout });
+      await page.waitForLoadState("domcontentloaded", { timeout });
 
       // 检查搜索后的URL是否被重定向到人机验证页面
       const searchUrl = page.url();
@@ -1176,7 +1176,7 @@ export async function getGoogleSearchPageHtml(
       // 访问Google搜索页面
       const response = await page.goto(selectedDomain, {
         timeout,
-        waitUntil: "networkidle",
+        waitUntil: "domcontentloaded",
       });
 
       // 检查是否被重定向到人机验证页面
@@ -1246,7 +1246,7 @@ export async function getGoogleSearchPageHtml(
       logger.info("正在等待搜索结果页面加载完成...");
 
       // 等待页面加载完成
-      await page.waitForLoadState("networkidle", { timeout });
+      await page.waitForLoadState("domcontentloaded", { timeout });
 
       // 检查搜索后的URL是否被重定向到人机验证页面
       const searchUrl = page.url();
@@ -1274,7 +1274,7 @@ export async function getGoogleSearchPageHtml(
       await page.waitForTimeout(1000); // 等待1秒，让页面完全稳定
 
       // 再次等待网络空闲，确保所有异步操作完成
-      await page.waitForLoadState("networkidle", { timeout });
+      await page.waitForLoadState("domcontentloaded", { timeout });
 
       // 获取页面HTML内容
       const fullHtml = await page.content();
