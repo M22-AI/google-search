@@ -28,7 +28,7 @@ function loadApiKeys() {
 
 const apiKeys = loadApiKeys();
 const MAX_CONCURRENCY = parseInt(process.env.SEARCH_CONCURRENCY || "2", 10);
-const MAX_TIMEOUT = parseInt(process.env.MAX_TIMEOUT || "120000", 10);
+const MAX_TIMEOUT = parseInt(process.env.MAX_TIMEOUT || "180000", 10);
 
 const MODULE_DIR = path.resolve(
   process.env.GOOGLE_SEARCH_DIR ||
@@ -318,7 +318,7 @@ const openapiSpec = {
           {
             name: "timeout",
             in: "query",
-            schema: { type: "integer", minimum: 1000, default: 60000 },
+            schema: { type: "integer", minimum: 1000, default: 180000 },
             description: "Search timeout in ms (capped by MAX_TIMEOUT env)",
           },
           {
@@ -350,7 +350,7 @@ const openapiSpec = {
                 properties: {
                   query: { type: "string" },
                   limit: { type: "integer", minimum: 1, maximum: 20, default: 10 },
-                  timeout: { type: "integer", minimum: 1000, default: 60000 },
+                  timeout: { type: "integer", minimum: 1000, default: 180000 },
                   locale: { type: "string" },
                 },
               },
@@ -502,7 +502,7 @@ const server = http.createServer(async (req, res) => {
           body.timeout ?? url.searchParams.get("timeout"),
           1000,
           MAX_TIMEOUT,
-          60000
+          180000
         ),
         stateFile: stateFilePath,
       };
