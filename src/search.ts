@@ -342,6 +342,19 @@ export async function googleSearch(
       storageState ? { ...contextOptions, storageState } : contextOptions
     );
 
+    // 预设SOCS同意cookie，防止欧盟地区IP触发Google Cookie同意对话框拦截点击
+    // （对话框会覆盖搜索框，导致 element click 超时，见 LSCOAf/gowsYd 报错）
+    await context.addCookies(
+      [".google.com", ".google.ca", ".google.co.uk", ".google.com.au"].map(
+        (domain) => ({
+          name: "SOCS",
+          value: "CAESEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg",
+          domain,
+          path: "/",
+        })
+      )
+    );
+
     // 设置额外的浏览器属性以避免检测
     await context.addInitScript(() => {
       // 覆盖 navigator 属性
@@ -1024,6 +1037,19 @@ export async function getGoogleSearchPageHtml(
 
     const context = await browser.newContext(
       storageState ? { ...contextOptions, storageState } : contextOptions
+    );
+
+    // 预设SOCS同意cookie，防止欧盟地区IP触发Google Cookie同意对话框拦截点击
+    // （对话框会覆盖搜索框，导致 element click 超时，见 LSCOAf/gowsYd 报错）
+    await context.addCookies(
+      [".google.com", ".google.ca", ".google.co.uk", ".google.com.au"].map(
+        (domain) => ({
+          name: "SOCS",
+          value: "CAESEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg",
+          domain,
+          path: "/",
+        })
+      )
     );
 
     // 设置额外的浏览器属性以避免检测
